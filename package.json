@@ -1,6 +1,6 @@
 {
   "name": "rest-tester",
-  "displayName": "REST Tester",
+  "displayName": "apibird — REST Tester",
   "description": "A lightweight REST client to test API requests inside VS Code",
   "version": "0.0.1",
   "publisher": "amitcode7483",
