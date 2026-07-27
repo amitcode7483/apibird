@@ -77,6 +77,14 @@
       {
         "command": "apibird.exportCollection",
         "title": "Export Collection…"
+      },
+      {
+        "command": "apibird.selectEnvironment",
+        "title": "apibird: Select Environment"
+      },
+      {
+        "command": "apibird.manageEnvironments",
+        "title": "apibird: Manage Environments"
       }
     ],
     "menus": {

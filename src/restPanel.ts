@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { getPanelHtml } from './panelHtml';
-import { CollectionsStore, newId } from './storage';
+import { CollectionsStore, EnvironmentsStore, newId } from './storage';
 import { CollectionsProvider } from './collectionsProvider';
 import { addCollection, addFolder, saveRequest as saveRequestOp } from './collectionsOps';
+import { substituteVars } from './environments';
 import { KeyValue, SavedRequest } from './types';
 
 interface RequestMessage {
@@ -23,6 +24,7 @@ export interface RestPanelDeps {
   context: vscode.ExtensionContext;
   collectionsStore: CollectionsStore;
   collectionsProvider: CollectionsProvider;
+  environmentsStore: EnvironmentsStore;
 }
 
 const NEW_COLLECTION_PICK = '$(add) New Collection…';
@@ -81,23 +83,47 @@ export class RestPanel {
 
   private async _handleRequest(req: RequestMessage) {
     const start = Date.now();
+
+    const activeVars = this.deps.environmentsStore.getActive()?.variables ?? [];
+    const unresolved = new Set<string>();
+    const applySub = (text: string): string => {
+      const { result, unresolved: tokens } = substituteVars(text, activeVars);
+      tokens.forEach((t) => unresolved.add(t));
+      return result;
+    };
+
+    const url = applySub(req.url);
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      headers[applySub(key)] = applySub(value);
+    }
+    const body = req.body ? applySub(req.body) : req.body;
+
+    if (unresolved.size > 0) {
+      this._panel.webview.postMessage({
+        type: 'unresolved',
+        payload: { tokens: [...unresolved] },
+      });
+      return;
+    }
+
     try {
       const options: RequestInit = {
         method: req.method,
-        headers: req.headers,
+        headers,
       };
       const noBody = req.method === 'GET' || req.method === 'HEAD';
-      if (!noBody && req.body && req.body.trim().length > 0) {
-        options.body = req.body;
+      if (!noBody && body && body.trim().length > 0) {
+        options.body = body;
       }
 
-      const res = await fetch(req.url, options);
+      const res = await fetch(url, options);
       const elapsed = Date.now() - start;
       const text = await res.text();
 
-      const headers: Record<string, string> = {};
+      const responseHeaders: Record<string, string> = {};
       res.headers.forEach((value, key) => {
-        headers[key] = value;
+        responseHeaders[key] = value;
       });
 
       this._panel.webview.postMessage({
@@ -107,7 +133,7 @@ export class RestPanel {
           statusText: res.statusText,
           time: elapsed,
           size: new TextEncoder().encode(text).length,
-          headers,
+          headers: responseHeaders,
           body: text,
         },
       });

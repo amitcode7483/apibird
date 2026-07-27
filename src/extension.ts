@@ -1,17 +1,20 @@
 import * as vscode from 'vscode';
-import { CollectionsStore } from './storage';
+import { CollectionsStore, EnvironmentsStore } from './storage';
 import { CollectionsProvider, nodeLabel } from './collectionsProvider';
 import { NodeRef, addCollection, addFolder, deleteNode, duplicateNode, findRequest, renameNode } from './collectionsOps';
+import { registerEnvironmentsFeature } from './environments';
 import { RestPanel } from './restPanel';
 import { Collection } from './types';
 
 export function activate(context: vscode.ExtensionContext) {
   const collectionsStore = new CollectionsStore(context);
   const collectionsProvider = new CollectionsProvider(collectionsStore);
+  const environmentsStore = new EnvironmentsStore(context);
 
   context.subscriptions.push(vscode.window.registerTreeDataProvider('apibird.collections', collectionsProvider));
+  registerEnvironmentsFeature(context, environmentsStore);
 
-  const panelDeps = { context, collectionsStore, collectionsProvider };
+  const panelDeps = { context, collectionsStore, collectionsProvider, environmentsStore };
 
   context.subscriptions.push(
     vscode.commands.registerCommand('restTester.open', () => {

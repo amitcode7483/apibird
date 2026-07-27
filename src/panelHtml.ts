@@ -73,6 +73,7 @@ export function getPanelHtml(webview: vscode.Webview): string {
   #status-line { margin: 10px 0; font-weight: 600; }
   .status-ok { color: var(--vscode-testing-iconPassed, #4caf50); }
   .status-err { color: var(--vscode-testing-iconFailed, #f44336); }
+  .status-warn { color: var(--vscode-editorWarning-foreground, #cca700); }
   .muted { opacity: 0.7; font-weight: 400; margin-left: 10px; }
   pre {
     white-space: pre-wrap; word-break: break-word;
@@ -245,6 +246,12 @@ export function getPanelHtml(webview: vscode.Webview): string {
       statusLine.className = 'status-err';
       statusLine.innerHTML = 'Request failed <span class="muted">' + msg.payload.time + ' ms</span>';
       document.getElementById('resp-body').textContent = msg.payload.message;
+      document.getElementById('resp-headers').textContent = '';
+    } else if (msg.type === 'unresolved') {
+      statusLine.className = 'status-warn';
+      statusLine.textContent = 'Unresolved variables — not sent: ' +
+        msg.payload.tokens.map((t) => '{{' + t + '}}').join(', ');
+      document.getElementById('resp-body').textContent = '';
       document.getElementById('resp-headers').textContent = '';
     } else if (msg.type === 'loadRequest') {
       const r = msg.payload;
