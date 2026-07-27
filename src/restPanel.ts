@@ -75,6 +75,9 @@ export class RestPanel {
           await this._handleRequest(message.payload as RequestMessage);
         } else if (message.type === 'save') {
           await this._handleSave(message.payload as SaveMessage);
+        } else if (message.type === 'copy') {
+          await vscode.env.clipboard.writeText(message.payload as string);
+          vscode.window.setStatusBarMessage('apibird: response copied to clipboard', 2000);
         }
       },
       null,

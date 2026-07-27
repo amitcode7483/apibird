@@ -75,15 +75,30 @@ export function getPanelHtml(webview: vscode.Webview): string {
   .status-err { color: var(--vscode-testing-iconFailed, #f44336); }
   .status-warn { color: var(--vscode-editorWarning-foreground, #cca700); }
   .muted { opacity: 0.7; font-weight: 400; margin-left: 10px; }
-  pre {
+  pre, .code-block {
     white-space: pre-wrap; word-break: break-word;
     background: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.1));
     padding: 10px; border-radius: 3px; max-height: 420px; overflow: auto;
     font-family: var(--vscode-editor-font-family, monospace);
+    margin: 0;
   }
   #auth-type { margin-bottom: 10px; }
   .auth-fields { display: flex; flex-direction: column; gap: 6px; max-width: 360px; }
   .auth-fields.hidden { display: none; }
+  .resp-toolbar { display: flex; align-items: center; justify-content: space-between; }
+  .resp-toolbar .resp-tabs { margin-bottom: 0; border-bottom: none; }
+  #copy-response { padding: 4px 10px; }
+  .json-line { white-space: pre; }
+  .json-children { margin-left: 18px; }
+  .json-children.hidden { display: none; }
+  .json-toggle { display: inline-block; width: 14px; opacity: 0.6; user-select: none; }
+  .json-toggle.clickable { cursor: pointer; }
+  .json-toggle.clickable:hover { opacity: 1; }
+  .json-key { color: var(--vscode-symbolIcon-fieldForeground, #9cdcfe); }
+  .json-string { color: var(--vscode-debugTokenExpression-string, #ce9178); }
+  .json-number { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
+  .json-boolean, .json-null { color: var(--vscode-debugTokenExpression-boolean, #569cd6); }
+  .json-brace { opacity: 0.85; }
 </style>
 </head>
 <body>
@@ -140,12 +155,15 @@ export function getPanelHtml(webview: vscode.Webview): string {
 
   <div class="response" id="response" style="display:none;">
     <div id="status-line"></div>
-    <div class="resp-tabs">
-      <button class="rtab active" data-rtab="resp-body">Body</button>
-      <button class="rtab" data-rtab="resp-headers">Headers</button>
+    <div class="resp-toolbar">
+      <div class="resp-tabs">
+        <button class="rtab active" data-rtab="resp-body">Body</button>
+        <button class="rtab" data-rtab="resp-headers">Headers</button>
+      </div>
+      <button class="secondary" id="copy-response">Copy</button>
     </div>
-    <pre id="resp-body" class="resp-panel"></pre>
-    <pre id="resp-headers" class="resp-panel hidden"></pre>
+    <div id="resp-body" class="resp-panel code-block"></div>
+    <pre id="resp-headers" class="resp-panel code-block hidden"></pre>
   </div>
 
 <script nonce="${nonce}">
@@ -347,14 +365,91 @@ export function getPanelHtml(webview: vscode.Webview): string {
   });
 
   // --- receive ---
-  function pretty(text) {
-    try { return JSON.stringify(JSON.parse(text), null, 2); }
-    catch { return text; }
-  }
   function fmtSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     return (bytes / 1024).toFixed(1) + ' KB';
   }
+
+  // --- collapsible, syntax-highlighted JSON tree ---
+  function spanTok(text, cls) {
+    const s = document.createElement('span');
+    if (cls) s.className = cls;
+    s.textContent = text;
+    return s;
+  }
+  function renderJsonValue(value) {
+    if (value === null) return spanTok('null', 'json-null');
+    if (Array.isArray(value)) return renderJsonContainer(value, '[', ']', true);
+    if (typeof value === 'object') return renderJsonContainer(value, '{', '}', false);
+    if (typeof value === 'string') return spanTok(JSON.stringify(value), 'json-string');
+    if (typeof value === 'number') return spanTok(String(value), 'json-number');
+    if (typeof value === 'boolean') return spanTok(String(value), 'json-boolean');
+    return spanTok(String(value), '');
+  }
+  function renderJsonContainer(value, open, close, isArray) {
+    const entries = isArray ? value.map((v, i) => [String(i), v]) : Object.entries(value);
+    const wrapper = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.className = 'json-line';
+    const toggle = spanTok(entries.length ? '▾' : ' ', 'json-toggle');
+    header.appendChild(toggle);
+    header.appendChild(spanTok(open, 'json-brace'));
+
+    const childrenWrap = document.createElement('div');
+    childrenWrap.className = 'json-children';
+    entries.forEach(([k, v], idx) => {
+      const line = document.createElement('div');
+      line.className = 'json-line';
+      if (!isArray) {
+        line.appendChild(spanTok('"' + k + '"', 'json-key'));
+        line.appendChild(spanTok(': ', ''));
+      }
+      line.appendChild(renderJsonValue(v));
+      if (idx < entries.length - 1) line.appendChild(spanTok(',', ''));
+      childrenWrap.appendChild(line);
+    });
+
+    const footer = document.createElement('div');
+    footer.className = 'json-line';
+    footer.appendChild(spanTok(close, 'json-brace'));
+
+    wrapper.append(header, childrenWrap, footer);
+
+    if (entries.length === 0) {
+      header.appendChild(spanTok(close, 'json-brace'));
+      childrenWrap.remove();
+      footer.remove();
+    } else {
+      toggle.classList.add('clickable');
+      const collapsedTail = spanTok(' … ' + close, 'muted');
+      toggle.addEventListener('click', () => {
+        const collapsed = childrenWrap.classList.toggle('hidden');
+        footer.classList.toggle('hidden', collapsed);
+        toggle.textContent = collapsed ? '▸' : '▾';
+        if (collapsed) header.appendChild(collapsedTail);
+        else collapsedTail.remove();
+      });
+    }
+    return wrapper;
+  }
+  function renderResponseBody(text) {
+    const container = document.getElementById('resp-body');
+    container.innerHTML = '';
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = undefined; }
+    if (parsed !== undefined && typeof parsed === 'object' && parsed !== null) {
+      container.appendChild(renderJsonValue(parsed));
+    } else {
+      container.textContent = text;
+    }
+  }
+
+  let lastResponseBody = '';
+  document.getElementById('copy-response').addEventListener('click', () => {
+    if (!lastResponseBody) return;
+    vscode.postMessage({ type: 'copy', payload: lastResponseBody });
+  });
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
@@ -365,18 +460,21 @@ export function getPanelHtml(webview: vscode.Webview): string {
       statusLine.className = ok ? 'status-ok' : 'status-err';
       statusLine.innerHTML = p.status + ' ' + p.statusText +
         '<span class="muted">' + p.time + ' ms · ' + fmtSize(p.size) + '</span>';
-      document.getElementById('resp-body').textContent = pretty(p.body);
+      lastResponseBody = p.body;
+      renderResponseBody(p.body);
       document.getElementById('resp-headers').textContent =
         Object.entries(p.headers).map(([k, v]) => k + ': ' + v).join('\\n');
     } else if (msg.type === 'error') {
       statusLine.className = 'status-err';
       statusLine.innerHTML = 'Request failed <span class="muted">' + msg.payload.time + ' ms</span>';
+      lastResponseBody = msg.payload.message;
       document.getElementById('resp-body').textContent = msg.payload.message;
       document.getElementById('resp-headers').textContent = '';
     } else if (msg.type === 'unresolved') {
       statusLine.className = 'status-warn';
       statusLine.textContent = 'Unresolved variables — not sent: ' +
         msg.payload.tokens.map((t) => '{{' + t + '}}').join(', ');
+      lastResponseBody = '';
       document.getElementById('resp-body').textContent = '';
       document.getElementById('resp-headers').textContent = '';
     } else if (msg.type === 'loadRequest') {
