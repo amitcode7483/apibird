@@ -4,20 +4,23 @@ import { CollectionsStore, EnvironmentsStore, newId } from './storage';
 import { CollectionsProvider } from './collectionsProvider';
 import { addCollection, addFolder, saveRequest as saveRequestOp } from './collectionsOps';
 import { substituteVars } from './environments';
-import { KeyValue, SavedRequest } from './types';
+import { AuthConfig, KeyValue, SavedRequest } from './types';
 
 interface RequestMessage {
   method: string;
   url: string;
   headers: Record<string, string>;
   body?: string;
+  auth: AuthConfig;
 }
 
 interface SaveMessage {
   method: string;
   url: string;
   headers: KeyValue[];
+  params: KeyValue[];
   body: string;
+  auth: AuthConfig;
 }
 
 export interface RestPanelDeps {
@@ -98,6 +101,14 @@ export class RestPanel {
       headers[applySub(key)] = applySub(value);
     }
     const body = req.body ? applySub(req.body) : req.body;
+
+    if (req.auth?.type === 'bearer' && req.auth.token) {
+      headers['Authorization'] = `Bearer ${applySub(req.auth.token)}`;
+    } else if (req.auth?.type === 'basic') {
+      const username = applySub(req.auth.username);
+      const password = applySub(req.auth.password);
+      headers['Authorization'] = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+    }
 
     if (unresolved.size > 0) {
       this._panel.webview.postMessage({
@@ -204,9 +215,9 @@ export class RestPanel {
       method: payload.method,
       url: payload.url,
       headers: payload.headers,
-      params: [],
+      params: payload.params,
       body: payload.body,
-      auth: { type: 'none' },
+      auth: payload.auth,
     };
 
     collections = saveRequestOp(collections, collectionId, folderId, savedRequest);

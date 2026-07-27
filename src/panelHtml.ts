@@ -81,6 +81,9 @@ export function getPanelHtml(webview: vscode.Webview): string {
     padding: 10px; border-radius: 3px; max-height: 420px; overflow: auto;
     font-family: var(--vscode-editor-font-family, monospace);
   }
+  #auth-type { margin-bottom: 10px; }
+  .auth-fields { display: flex; flex-direction: column; gap: 6px; max-width: 360px; }
+  .auth-fields.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -100,8 +103,15 @@ export function getPanelHtml(webview: vscode.Webview): string {
   </div>
 
   <div class="tabs">
+    <button class="tab" data-tab="params">Params</button>
     <button class="tab active" data-tab="headers">Headers</button>
     <button class="tab" data-tab="body">Body</button>
+    <button class="tab" data-tab="auth">Auth</button>
+  </div>
+
+  <div id="params-panel" class="panel hidden">
+    <div id="params-list"></div>
+    <button class="secondary" id="add-param">+ Add param</button>
   </div>
 
   <div id="headers-panel" class="panel">
@@ -111,6 +121,21 @@ export function getPanelHtml(webview: vscode.Webview): string {
 
   <div id="body-panel" class="panel hidden">
     <textarea id="body" placeholder='{ "key": "value" }'></textarea>
+  </div>
+
+  <div id="auth-panel" class="panel hidden">
+    <select id="auth-type">
+      <option value="none">None</option>
+      <option value="bearer">Bearer Token</option>
+      <option value="basic">Basic Auth</option>
+    </select>
+    <div id="auth-bearer" class="auth-fields hidden">
+      <input id="auth-token" type="text" placeholder="Token" />
+    </div>
+    <div id="auth-basic" class="auth-fields hidden">
+      <input id="auth-username" type="text" placeholder="Username" />
+      <input id="auth-password" type="password" placeholder="Password" />
+    </div>
   </div>
 
   <div class="response" id="response" style="display:none;">
@@ -132,8 +157,9 @@ export function getPanelHtml(webview: vscode.Webview): string {
       document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
       t.classList.add('active');
       const target = t.getAttribute('data-tab');
-      document.getElementById('headers-panel').classList.toggle('hidden', target !== 'headers');
-      document.getElementById('body-panel').classList.toggle('hidden', target !== 'body');
+      document.querySelectorAll('.panel').forEach((p) => {
+        p.classList.toggle('hidden', p.id !== target + '-panel');
+      });
     });
   });
 
@@ -186,6 +212,103 @@ export function getPanelHtml(webview: vscode.Webview): string {
     return pairs;
   }
 
+  // --- dynamic param rows, two-way synced with the URL query string ---
+  const paramsList = document.getElementById('params-list');
+  const urlInput = document.getElementById('url');
+  let syncingParams = false;
+
+  function addParamRow(key, value) {
+    const row = document.createElement('div');
+    row.className = 'header-row';
+    const k = document.createElement('input');
+    k.placeholder = 'Key'; k.value = key || '';
+    const v = document.createElement('input');
+    v.placeholder = 'Value'; v.value = value || '';
+    const rm = document.createElement('button');
+    rm.className = 'secondary remove'; rm.textContent = '✕';
+    rm.addEventListener('click', () => { row.remove(); syncUrlFromParams(); });
+    k.addEventListener('input', syncUrlFromParams);
+    v.addEventListener('input', syncUrlFromParams);
+    row.append(k, v, rm);
+    paramsList.appendChild(row);
+  }
+  function clearParamRows() {
+    paramsList.innerHTML = '';
+  }
+  function collectParamPairs() {
+    const pairs = [];
+    paramsList.querySelectorAll('.header-row').forEach((row) => {
+      const [k, v] = row.querySelectorAll('input');
+      if (k.value.trim()) pairs.push({ key: k.value.trim(), value: v.value });
+    });
+    return pairs;
+  }
+  function urlWithoutQuery(url) {
+    const i = url.indexOf('?');
+    return i === -1 ? url : url.slice(0, i);
+  }
+  function paramsFromUrl(url) {
+    const i = url.indexOf('?');
+    if (i === -1) return [];
+    const qs = url.slice(i + 1);
+    if (!qs) return [];
+    return qs.split('&').filter(Boolean).map((pair) => {
+      const [k, v] = pair.split('=');
+      const decode = (s) => { try { return decodeURIComponent((s || '').replace(/\\+/g, ' ')); } catch { return s || ''; } };
+      return { key: decode(k), value: decode(v) };
+    });
+  }
+  function syncUrlFromParams() {
+    if (syncingParams) return;
+    syncingParams = true;
+    const pairs = collectParamPairs();
+    const qs = pairs.map((p) => encodeURIComponent(p.key) + '=' + encodeURIComponent(p.value)).join('&');
+    urlInput.value = qs ? urlWithoutQuery(urlInput.value) + '?' + qs : urlWithoutQuery(urlInput.value);
+    syncingParams = false;
+  }
+  function syncParamsFromUrl() {
+    if (syncingParams) return;
+    syncingParams = true;
+    const pairs = paramsFromUrl(urlInput.value);
+    clearParamRows();
+    pairs.forEach((p) => addParamRow(p.key, p.value));
+    if (pairs.length === 0) addParamRow();
+    syncingParams = false;
+  }
+  document.getElementById('add-param').addEventListener('click', () => addParamRow());
+  urlInput.addEventListener('input', syncParamsFromUrl);
+  addParamRow();
+
+  // --- auth tab ---
+  const authType = document.getElementById('auth-type');
+  function updateAuthFieldsVisibility() {
+    document.getElementById('auth-bearer').classList.toggle('hidden', authType.value !== 'bearer');
+    document.getElementById('auth-basic').classList.toggle('hidden', authType.value !== 'basic');
+  }
+  authType.addEventListener('change', updateAuthFieldsVisibility);
+  updateAuthFieldsVisibility();
+
+  function collectAuth() {
+    if (authType.value === 'bearer') {
+      return { type: 'bearer', token: document.getElementById('auth-token').value };
+    }
+    if (authType.value === 'basic') {
+      return {
+        type: 'basic',
+        username: document.getElementById('auth-username').value,
+        password: document.getElementById('auth-password').value,
+      };
+    }
+    return { type: 'none' };
+  }
+  function loadAuth(auth) {
+    authType.value = (auth && auth.type) || 'none';
+    document.getElementById('auth-token').value = auth && auth.type === 'bearer' ? auth.token || '' : '';
+    document.getElementById('auth-username').value = auth && auth.type === 'basic' ? auth.username || '' : '';
+    document.getElementById('auth-password').value = auth && auth.type === 'basic' ? auth.password || '' : '';
+    updateAuthFieldsVisibility();
+  }
+
   // --- send ---
   document.getElementById('send').addEventListener('click', () => {
     const statusLine = document.getElementById('status-line');
@@ -199,6 +322,7 @@ export function getPanelHtml(webview: vscode.Webview): string {
         url: document.getElementById('url').value.trim(),
         headers: collectHeaders(),
         body: document.getElementById('body').value,
+        auth: collectAuth(),
       },
     });
   });
@@ -215,7 +339,9 @@ export function getPanelHtml(webview: vscode.Webview): string {
         method: document.getElementById('method').value,
         url: document.getElementById('url').value.trim(),
         headers: collectHeaderPairs(),
+        params: collectParamPairs(),
         body: document.getElementById('body').value,
+        auth: collectAuth(),
       },
     });
   });
@@ -261,6 +387,8 @@ export function getPanelHtml(webview: vscode.Webview): string {
       clearHeaderRows();
       (r.headers || []).forEach((h) => addHeaderRow(h.key, h.value));
       if ((r.headers || []).length === 0) addHeaderRow();
+      syncParamsFromUrl();
+      loadAuth(r.auth);
     }
   });
 </script>
