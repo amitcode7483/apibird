@@ -1,20 +1,33 @@
 import * as vscode from 'vscode';
-import { CollectionsStore, EnvironmentsStore } from './storage';
+import { CollectionsStore, EnvironmentsStore, HistoryStore } from './storage';
 import { CollectionsProvider, nodeLabel } from './collectionsProvider';
+import { HistoryProvider } from './historyProvider';
 import { NodeRef, addCollection, addFolder, deleteNode, duplicateNode, findRequest, renameNode } from './collectionsOps';
 import { registerEnvironmentsFeature } from './environments';
 import { RestPanel } from './restPanel';
-import { Collection } from './types';
+import { Collection, HistoryEntry } from './types';
 
 export function activate(context: vscode.ExtensionContext) {
   const collectionsStore = new CollectionsStore(context);
   const collectionsProvider = new CollectionsProvider(collectionsStore);
   const environmentsStore = new EnvironmentsStore(context);
+  const historyStore = new HistoryStore(context);
+  const historyProvider = new HistoryProvider(historyStore);
 
-  context.subscriptions.push(vscode.window.registerTreeDataProvider('apibird.collections', collectionsProvider));
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider('apibird.collections', collectionsProvider),
+    vscode.window.registerTreeDataProvider('apibird.history', historyProvider)
+  );
   registerEnvironmentsFeature(context, environmentsStore);
 
-  const panelDeps = { context, collectionsStore, collectionsProvider, environmentsStore };
+  const panelDeps = {
+    context,
+    collectionsStore,
+    collectionsProvider,
+    environmentsStore,
+    historyStore,
+    historyProvider,
+  };
 
   context.subscriptions.push(
     vscode.commands.registerCommand('restTester.open', () => {
@@ -62,6 +75,10 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('apibird.duplicateItem', async (ref: NodeRef) => {
       await collectionsStore.setAll(duplicateNode(collectionsStore.getAll(), ref));
       collectionsProvider.refresh();
+    }),
+
+    vscode.commands.registerCommand('apibird.openHistoryEntry', (entry: HistoryEntry) => {
+      RestPanel.createOrShow(panelDeps).loadFromHistory(entry);
     }),
 
     vscode.commands.registerCommand('apibird.openRequest', (ref: NodeRef) => {

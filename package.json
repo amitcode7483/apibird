@@ -40,6 +40,11 @@
           "id": "apibird.collections",
           "name": "Collections",
           "icon": "resources/apibird-icon.svg"
+        },
+        {
+          "id": "apibird.history",
+          "name": "History",
+          "icon": "resources/apibird-icon.svg"
         }
       ]
     },

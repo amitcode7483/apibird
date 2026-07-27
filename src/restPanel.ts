@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { getPanelHtml } from './panelHtml';
-import { CollectionsStore, EnvironmentsStore, newId } from './storage';
+import { CollectionsStore, EnvironmentsStore, HistoryStore, newId } from './storage';
 import { CollectionsProvider } from './collectionsProvider';
+import { HistoryProvider } from './historyProvider';
 import { addCollection, addFolder, saveRequest as saveRequestOp } from './collectionsOps';
 import { substituteVars } from './environments';
-import { AuthConfig, KeyValue, SavedRequest } from './types';
+import { AuthConfig, HistoryEntry, KeyValue, SavedRequest } from './types';
 
 interface RequestMessage {
   method: string;
@@ -28,6 +29,8 @@ export interface RestPanelDeps {
   collectionsStore: CollectionsStore;
   collectionsProvider: CollectionsProvider;
   environmentsStore: EnvironmentsStore;
+  historyStore: HistoryStore;
+  historyProvider: HistoryProvider;
 }
 
 const NEW_COLLECTION_PICK = '$(add) New Collection…';
@@ -82,6 +85,16 @@ export class RestPanel {
   public loadRequest(request: SavedRequest): void {
     this._panel.reveal();
     this._panel.webview.postMessage({ type: 'loadRequest', payload: request });
+  }
+
+  public loadFromHistory(entry: HistoryEntry): void {
+    this._panel.reveal();
+    this._panel.webview.postMessage({ type: 'loadRequest', payload: { method: entry.method, url: entry.url } });
+  }
+
+  private async _logHistory(method: string, url: string, status: number | string, time: number) {
+    await this.deps.historyStore.push({ id: newId(), method, url, status, time, timestamp: Date.now() });
+    this.deps.historyProvider.refresh();
   }
 
   private async _handleRequest(req: RequestMessage) {
@@ -148,12 +161,15 @@ export class RestPanel {
           body: text,
         },
       });
+      await this._logHistory(req.method, req.url, res.status, elapsed);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      const elapsed = Date.now() - start;
       this._panel.webview.postMessage({
         type: 'error',
-        payload: { message, time: Date.now() - start },
+        payload: { message, time: elapsed },
       });
+      await this._logHistory(req.method, req.url, 'ERR', elapsed);
     }
   }
 
