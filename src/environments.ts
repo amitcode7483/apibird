@@ -27,37 +27,45 @@ export function registerEnvironmentsFeature(
 
   context.subscriptions.push(
     vscode.commands.registerCommand('apibird.selectEnvironment', async () => {
-      const environments = store.getAll();
-      type Item = vscode.QuickPickItem & { action?: 'none' | 'new' | 'manage'; envId?: string };
-      const items: Item[] = environments.map((e) => ({
-        label: e.name,
-        description: `${e.variables.length} variable${e.variables.length === 1 ? '' : 's'}`,
-        envId: e.id,
-      }));
-      items.push(
-        { label: '$(circle-slash) No Environment', action: 'none' },
-        { label: '$(add) New Environment…', action: 'new' },
-        { label: '$(gear) Manage Environments…', action: 'manage' }
-      );
-      const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Select active environment' });
-      if (!picked) return;
+      try {
+        const environments = store.getAll();
+        type Item = vscode.QuickPickItem & { action?: 'none' | 'new' | 'manage'; envId?: string };
+        const items: Item[] = environments.map((e) => ({
+          label: e.name,
+          description: `${e.variables.length} variable${e.variables.length === 1 ? '' : 's'}`,
+          envId: e.id,
+        }));
+        items.push(
+          { label: '$(circle-slash) No Environment', action: 'none' },
+          { label: '$(add) New Environment…', action: 'new' },
+          { label: '$(gear) Manage Environments…', action: 'manage' }
+        );
+        const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Select active environment' });
+        if (!picked) return;
 
-      if (picked.action === 'none') {
-        await store.setActiveId(undefined);
-      } else if (picked.action === 'new') {
-        const created = await createEnvironmentFlow(store);
-        if (created) await store.setActiveId(created.id);
-      } else if (picked.action === 'manage') {
-        await manageEnvironmentsFlow(store);
-      } else if (picked.envId) {
-        await store.setActiveId(picked.envId);
+        if (picked.action === 'none') {
+          await store.setActiveId(undefined);
+        } else if (picked.action === 'new') {
+          const created = await createEnvironmentFlow(store);
+          if (created) await store.setActiveId(created.id);
+        } else if (picked.action === 'manage') {
+          await manageEnvironmentsFlow(store);
+        } else if (picked.envId) {
+          await store.setActiveId(picked.envId);
+        }
+        refreshStatusBar(statusBarItem, store);
+      } catch (err) {
+        vscode.window.showErrorMessage(`apibird: ${err instanceof Error ? err.message : String(err)}`);
       }
-      refreshStatusBar(statusBarItem, store);
     }),
 
     vscode.commands.registerCommand('apibird.manageEnvironments', async () => {
-      await manageEnvironmentsFlow(store);
-      refreshStatusBar(statusBarItem, store);
+      try {
+        await manageEnvironmentsFlow(store);
+        refreshStatusBar(statusBarItem, store);
+      } catch (err) {
+        vscode.window.showErrorMessage(`apibird: ${err instanceof Error ? err.message : String(err)}`);
+      }
     })
   );
 
@@ -107,60 +115,59 @@ async function manageEnvironmentsFlow(store: EnvironmentsStore): Promise<void> {
   }
 }
 
+/**
+ * Directly prompts key → value → key → value… until an empty key ends the loop.
+ * Deliberately avoids an intermediate submenu — that layer was where variable
+ * entry silently went nowhere for some users, so this cuts it out entirely.
+ */
 async function editEnvironmentFlow(store: EnvironmentsStore, envId: string): Promise<void> {
   for (;;) {
     const environments = store.getAll();
     const env = environments.find((e) => e.id === envId);
     if (!env) return;
 
-    type Item = vscode.QuickPickItem & { action: string; varIndex?: number };
-    const items: Item[] = env.variables.map((v, i) => ({
-      label: `${v.key} = ${v.value}`,
-      action: 'editVar',
-      varIndex: i,
-    }));
-    items.push(
-      { label: '$(add) Add Variable', action: 'addVar' },
-      { label: '$(edit) Rename Environment', action: 'rename' },
-      { label: '$(trash) Delete Environment', action: 'delete' },
-      { label: '$(arrow-left) Back', action: 'back' }
-    );
+    const summary = env.variables.length
+      ? env.variables.map((v) => `${v.key}=${v.value}`).join('  ·  ')
+      : 'no variables yet';
+    const key = await vscode.window.showInputBox({
+      title: `apibird — "${env.name}"  (${summary})`,
+      prompt: 'Variable name — leave empty and press Enter to finish',
+      placeHolder: 'e.g. baseUrl',
+    });
+    if (!key) break;
 
-    const picked = await vscode.window.showQuickPick(items, { placeHolder: `Editing "${env.name}"` });
-    if (!picked || picked.action === 'back') return;
+    const existing = env.variables.find((v) => v.key === key);
+    const value = await vscode.window.showInputBox({
+      title: `apibird — "${env.name}"`,
+      prompt: `Value for ${key}`,
+      value: existing?.value ?? '',
+    });
+    if (value === undefined) continue;
 
-    if (picked.action === 'addVar') {
-      const key = await vscode.window.showInputBox({ prompt: 'Variable name', placeHolder: 'baseUrl' });
-      if (!key) continue;
-      const value = (await vscode.window.showInputBox({ prompt: `Value for ${key}` })) ?? '';
-      env.variables.push({ key, value });
+    if (existing) existing.value = value;
+    else env.variables.push({ key, value });
+    await store.setAll(environments);
+  }
+
+  const environments = store.getAll();
+  const env = environments.find((e) => e.id === envId);
+  if (!env) return;
+
+  const followUp = await vscode.window.showQuickPick(
+    ['$(check) Done', '$(edit) Rename Environment', '$(trash) Delete Environment'],
+    { placeHolder: `Finished editing "${env.name}"` }
+  );
+  if (followUp === '$(edit) Rename Environment') {
+    const name = await vscode.window.showInputBox({ prompt: 'Rename environment', value: env.name });
+    if (name) {
+      env.name = name;
       await store.setAll(environments);
-    } else if (picked.action === 'editVar' && picked.varIndex !== undefined) {
-      const variable = env.variables[picked.varIndex];
-      const action = await vscode.window.showQuickPick(['Edit Value', 'Remove'], { placeHolder: variable.key });
-      if (action === 'Edit Value') {
-        const value = await vscode.window.showInputBox({ prompt: `Value for ${variable.key}`, value: variable.value });
-        if (value !== undefined) {
-          variable.value = value;
-          await store.setAll(environments);
-        }
-      } else if (action === 'Remove') {
-        env.variables.splice(picked.varIndex, 1);
-        await store.setAll(environments);
-      }
-    } else if (picked.action === 'rename') {
-      const name = await vscode.window.showInputBox({ prompt: 'Rename environment', value: env.name });
-      if (name) {
-        env.name = name;
-        await store.setAll(environments);
-      }
-    } else if (picked.action === 'delete') {
-      const confirm = await vscode.window.showWarningMessage(`Delete environment "${env.name}"?`, { modal: true }, 'Delete');
-      if (confirm === 'Delete') {
-        await store.setAll(environments.filter((e) => e.id !== envId));
-        if (store.getActiveId() === envId) await store.setActiveId(undefined);
-        return;
-      }
+    }
+  } else if (followUp === '$(trash) Delete Environment') {
+    const confirm = await vscode.window.showWarningMessage(`Delete environment "${env.name}"?`, { modal: true }, 'Delete');
+    if (confirm === 'Delete') {
+      await store.setAll(environments.filter((e) => e.id !== envId));
+      if (store.getActiveId() === envId) await store.setActiveId(undefined);
     }
   }
 }
