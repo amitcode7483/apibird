@@ -25,12 +25,97 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "apibird",
+          "title": "apibird",
+          "icon": "resources/apibird-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "apibird": [
+        {
+          "id": "apibird.collections",
+          "name": "Collections",
+          "icon": "resources/apibird-icon.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "restTester.open",
         "title": "REST Tester: Open"
+      },
+      {
+        "command": "apibird.newCollection",
+        "title": "New Collection",
+        "icon": "$(add)"
+      },
+      {
+        "command": "apibird.importCollection",
+        "title": "Import Collection…",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "apibird.newFolder",
+        "title": "New Folder"
+      },
+      {
+        "command": "apibird.renameItem",
+        "title": "Rename"
+      },
+      {
+        "command": "apibird.deleteItem",
+        "title": "Delete"
+      },
+      {
+        "command": "apibird.duplicateItem",
+        "title": "Duplicate"
+      },
+      {
+        "command": "apibird.exportCollection",
+        "title": "Export Collection…"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "apibird.newCollection",
+          "when": "view == apibird.collections",
+          "group": "navigation"
+        },
+        {
+          "command": "apibird.importCollection",
+          "when": "view == apibird.collections",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "apibird.newFolder",
+          "when": "view == apibird.collections && viewItem == collection",
+          "group": "inline"
+        },
+        {
+          "command": "apibird.exportCollection",
+          "when": "view == apibird.collections && viewItem == collection"
+        },
+        {
+          "command": "apibird.renameItem",
+          "when": "view == apibird.collections && (viewItem == collection || viewItem == folder || viewItem == request)"
+        },
+        {
+          "command": "apibird.duplicateItem",
+          "when": "view == apibird.collections && (viewItem == collection || viewItem == folder || viewItem == request)"
+        },
+        {
+          "command": "apibird.deleteItem",
+          "when": "view == apibird.collections && (viewItem == collection || viewItem == folder || viewItem == request)"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
