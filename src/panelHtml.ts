@@ -115,6 +115,7 @@ export function getPanelHtml(webview: vscode.Webview): string {
     <input id="url" type="text" placeholder="https://api.example.com/users" />
     <button id="send">Send</button>
     <button class="secondary" id="save">Save</button>
+    <button class="secondary" id="copy-curl">Copy as cURL</button>
   </div>
 
   <div class="tabs">
@@ -350,18 +351,24 @@ export function getPanelHtml(webview: vscode.Webview): string {
   });
 
   // --- save ---
+  function collectRequestPayload() {
+    return {
+      method: document.getElementById('method').value,
+      url: document.getElementById('url').value.trim(),
+      headers: collectHeaderPairs(),
+      params: collectParamPairs(),
+      body: document.getElementById('body').value,
+      auth: collectAuth(),
+    };
+  }
+
   document.getElementById('save').addEventListener('click', () => {
-    vscode.postMessage({
-      type: 'save',
-      payload: {
-        method: document.getElementById('method').value,
-        url: document.getElementById('url').value.trim(),
-        headers: collectHeaderPairs(),
-        params: collectParamPairs(),
-        body: document.getElementById('body').value,
-        auth: collectAuth(),
-      },
-    });
+    vscode.postMessage({ type: 'save', payload: collectRequestPayload() });
+  });
+
+  // --- copy as cURL ---
+  document.getElementById('copy-curl').addEventListener('click', () => {
+    vscode.postMessage({ type: 'copyCurl', payload: collectRequestPayload() });
   });
 
   // --- receive ---

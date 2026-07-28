@@ -90,6 +90,18 @@
       {
         "command": "apibird.manageEnvironments",
         "title": "apibird: Manage Environments"
+      },
+      {
+        "command": "apibird.importPostman",
+        "title": "apibird: Import → Postman Collection"
+      },
+      {
+        "command": "apibird.importThunderClient",
+        "title": "apibird: Import → Thunder Client"
+      },
+      {
+        "command": "apibird.importCurl",
+        "title": "apibird: Import cURL"
       }
     ],
     "menus": {

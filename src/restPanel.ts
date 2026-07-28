@@ -5,6 +5,7 @@ import { CollectionsProvider } from './collectionsProvider';
 import { HistoryProvider } from './historyProvider';
 import { addCollection, addFolder, saveRequest as saveRequestOp } from './collectionsOps';
 import { substituteVars } from './environments';
+import { toCurl } from './curl';
 import { AuthConfig, HistoryEntry, KeyValue, SavedRequest } from './types';
 
 interface RequestMessage {
@@ -78,6 +79,8 @@ export class RestPanel {
         } else if (message.type === 'copy') {
           await vscode.env.clipboard.writeText(message.payload as string);
           vscode.window.setStatusBarMessage('apibird: response copied to clipboard', 2000);
+        } else if (message.type === 'copyCurl') {
+          await this._handleCopyCurl(message.payload as SaveMessage);
         }
       },
       null,
@@ -174,6 +177,18 @@ export class RestPanel {
       });
       await this._logHistory(req.method, req.url, 'ERR', elapsed);
     }
+  }
+
+  private async _handleCopyCurl(payload: SaveMessage) {
+    const curl = toCurl({
+      method: payload.method,
+      url: payload.url,
+      headers: payload.headers,
+      body: payload.body,
+      auth: payload.auth,
+    });
+    await vscode.env.clipboard.writeText(curl);
+    vscode.window.setStatusBarMessage('apibird: cURL command copied to clipboard', 2000);
   }
 
   private async _handleSave(payload: SaveMessage) {

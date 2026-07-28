@@ -1,11 +1,27 @@
 import * as vscode from 'vscode';
-import { CollectionsStore, EnvironmentsStore, HistoryStore } from './storage';
+import { CollectionsStore, EnvironmentsStore, HistoryStore, newId } from './storage';
 import { CollectionsProvider, nodeLabel } from './collectionsProvider';
 import { HistoryProvider } from './historyProvider';
 import { NodeRef, addCollection, addFolder, deleteNode, duplicateNode, findRequest, renameNode } from './collectionsOps';
 import { registerEnvironmentsFeature } from './environments';
 import { RestPanel } from './restPanel';
-import { Collection, HistoryEntry } from './types';
+import { Collection, HistoryEntry, SavedRequest } from './types';
+import { exportToPostmanCollection, importPostmanCollection } from './postman';
+import { importThunderClientCollection } from './thunderClient';
+import { parseCurl } from './curl';
+
+function reportImportWarnings(channel: vscode.OutputChannel, summary: string, warnings: string[]): void {
+  if (warnings.length === 0) {
+    vscode.window.showInformationMessage(summary);
+    return;
+  }
+  channel.appendLine(`--- ${summary} ---`);
+  warnings.forEach((w) => channel.appendLine(`• ${w}`));
+  channel.appendLine('');
+  vscode.window.showWarningMessage(`${summary} — ${warnings.length} item(s) need attention.`, 'Show Details').then((choice) => {
+    if (choice === 'Show Details') channel.show();
+  });
+}
 
 export async function activate(context: vscode.ExtensionContext) {
   const collectionsStore = new CollectionsStore(context);
@@ -17,7 +33,10 @@ export async function activate(context: vscode.ExtensionContext) {
   await collectionsStore.initialize();
   await environmentsStore.initialize();
 
+  const importLog = vscode.window.createOutputChannel('apibird Import');
+
   context.subscriptions.push(
+    importLog,
     vscode.window.registerTreeDataProvider('apibird.collections', collectionsProvider),
     vscode.window.registerTreeDataProvider('apibird.history', historyProvider)
   );
@@ -103,16 +122,50 @@ export async function activate(context: vscode.ExtensionContext) {
       RestPanel.createOrShow(panelDeps).loadRequest(request);
     }),
 
-    vscode.commands.registerCommand('apibird.exportCollection', async (ref: NodeRef) => {
-      const collection = collectionsStore.getAll().find((c) => c.id === ref.collectionId);
+    vscode.commands.registerCommand('apibird.exportCollection', async (ref?: NodeRef) => {
+      const collections = collectionsStore.getAll();
+      let collection: Collection | undefined;
+      if (ref?.collectionId) {
+        collection = collections.find((c) => c.id === ref.collectionId);
+      } else {
+        if (collections.length === 0) {
+          vscode.window.showErrorMessage('No collections to export.');
+          return;
+        }
+        const picked = await vscode.window.showQuickPick(
+          collections.map((c) => c.name),
+          { placeHolder: 'Export which collection?' }
+        );
+        if (!picked) return;
+        collection = collections.find((c) => c.name === picked);
+      }
       if (!collection) return;
-      const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(`${collection.name}.json`),
-        filters: { JSON: ['json'] },
-      });
-      if (!uri) return;
-      const bytes = Buffer.from(JSON.stringify(collection, null, 2), 'utf8');
-      await vscode.workspace.fs.writeFile(uri, bytes);
+
+      const format = await vscode.window.showQuickPick(
+        [
+          { label: 'apibird JSON', description: 'Native format — no lock-in, re-importable into apibird', value: 'apibird' as const },
+          { label: 'Postman Collection v2.1', description: 'Compatible with Postman and other v2.1-schema tools', value: 'postman' as const },
+        ],
+        { placeHolder: 'Export format' }
+      );
+      if (!format) return;
+
+      if (format.value === 'apibird') {
+        const uri = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.file(`${collection.name}.json`),
+          filters: { JSON: ['json'] },
+        });
+        if (!uri) return;
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(collection, null, 2), 'utf8'));
+      } else {
+        const uri = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.file(`${collection.name}.postman_collection.json`),
+          filters: { JSON: ['json'] },
+        });
+        if (!uri) return;
+        const postmanJson = exportToPostmanCollection(collection);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(postmanJson, null, 2), 'utf8'));
+      }
       vscode.window.showInformationMessage(`Exported "${collection.name}"`);
     }),
 
@@ -139,6 +192,77 @@ export async function activate(context: vscode.ExtensionContext) {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         vscode.window.showErrorMessage(`Import failed: ${message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('apibird.importPostman', async () => {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { JSON: ['json'] },
+        title: 'Import Postman Collection (v2.1)',
+      });
+      if (!uris || uris.length === 0) return;
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+        const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
+        const { collection, warnings } = importPostmanCollection(parsed);
+        await collectionsStore.setAll([...collectionsStore.getAll(), collection]);
+        collectionsProvider.refresh();
+        reportImportWarnings(importLog, `Imported "${collection.name}" from Postman`, warnings);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(`Postman import failed: ${message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('apibird.importThunderClient', async () => {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { JSON: ['json'] },
+        title: 'Import Thunder Client Collection',
+      });
+      if (!uris || uris.length === 0) return;
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+        const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
+        const { collection, warnings } = importThunderClientCollection(parsed);
+        await collectionsStore.setAll([...collectionsStore.getAll(), collection]);
+        collectionsProvider.refresh();
+        reportImportWarnings(importLog, `Imported "${collection.name}" from Thunder Client`, warnings);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(`Thunder Client import failed: ${message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('apibird.importCurl', async () => {
+      const clipboard = await vscode.env.clipboard.readText();
+      const seed = /^\s*curl\b/i.test(clipboard) ? clipboard : '';
+      const input = await vscode.window.showInputBox({
+        title: 'apibird: Import cURL',
+        prompt: 'Paste a curl command',
+        placeHolder: 'curl https://api.example.com/users -H "Authorization: Bearer xyz"',
+        value: seed,
+        ignoreFocusOut: true,
+      });
+      if (!input) return;
+      try {
+        const parsed = parseCurl(input);
+        const request: SavedRequest = {
+          id: newId(),
+          name: '',
+          method: parsed.method,
+          url: parsed.url,
+          headers: parsed.headers,
+          params: [],
+          body: parsed.body,
+          auth: parsed.auth,
+        };
+        RestPanel.createOrShow(panelDeps).loadRequest(request);
+        vscode.window.setStatusBarMessage('apibird: imported cURL command into the request panel', 3000);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(`cURL import failed: ${message}`);
       }
     })
   );
