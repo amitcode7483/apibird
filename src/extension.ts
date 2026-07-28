@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { CollectionsStore, EnvironmentsStore, HistoryStore, newId } from './storage';
 import { CollectionsProvider, nodeLabel } from './collectionsProvider';
 import { HistoryProvider } from './historyProvider';
@@ -9,6 +11,23 @@ import { Collection, HistoryEntry, SavedRequest } from './types';
 import { exportToPostmanCollection, importPostmanCollection } from './postman';
 import { importThunderClientCollection } from './thunderClient';
 import { parseCurl } from './curl';
+
+function safeFileName(name: string): string {
+  return name.replace(/[\\/]+/g, '-').trim() || 'collection';
+}
+
+/**
+ * A bare `vscode.Uri.file('name.json')` resolves to `/name.json` — the save
+ * dialog then opens at the filesystem root, which is a read-only volume on
+ * macOS (EROFS) and typically inaccessible on other platforms too. Anchor the
+ * suggested path to the open workspace, falling back to the home directory,
+ * so the dialog opens somewhere writable.
+ */
+function defaultSaveUri(filename: string): vscode.Uri {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (workspaceRoot) return vscode.Uri.joinPath(workspaceRoot, filename);
+  return vscode.Uri.file(path.join(os.homedir(), filename));
+}
 
 function reportImportWarnings(channel: vscode.OutputChannel, summary: string, warnings: string[]): void {
   if (warnings.length === 0) {
@@ -150,16 +169,17 @@ export async function activate(context: vscode.ExtensionContext) {
       );
       if (!format) return;
 
+      const baseName = safeFileName(collection.name);
       if (format.value === 'apibird') {
         const uri = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.file(`${collection.name}.json`),
+          defaultUri: defaultSaveUri(`${baseName}.json`),
           filters: { JSON: ['json'] },
         });
         if (!uri) return;
         await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(collection, null, 2), 'utf8'));
       } else {
         const uri = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.file(`${collection.name}.postman_collection.json`),
+          defaultUri: defaultSaveUri(`${baseName}.postman_collection.json`),
           filters: { JSON: ['json'] },
         });
         if (!uri) return;
