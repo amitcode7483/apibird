@@ -7,18 +7,31 @@ import { registerEnvironmentsFeature } from './environments';
 import { RestPanel } from './restPanel';
 import { Collection, HistoryEntry } from './types';
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   const collectionsStore = new CollectionsStore(context);
   const collectionsProvider = new CollectionsProvider(collectionsStore);
   const environmentsStore = new EnvironmentsStore(context);
   const historyStore = new HistoryStore(context);
   const historyProvider = new HistoryProvider(historyStore);
 
+  await collectionsStore.initialize();
+  await environmentsStore.initialize();
+
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('apibird.collections', collectionsProvider),
     vscode.window.registerTreeDataProvider('apibird.history', historyProvider)
   );
   registerEnvironmentsFeature(context, environmentsStore);
+
+  // A workspace folder can be opened/closed after activation — re-sync so
+  // collections/environments switch between workspace files and globalState.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(async () => {
+      await collectionsStore.initialize();
+      await environmentsStore.initialize();
+      collectionsProvider.refresh();
+    })
+  );
 
   const panelDeps = {
     context,

@@ -120,14 +120,14 @@ async function manageEnvironmentsFlow(store: EnvironmentsStore): Promise<void> {
  * Deliberately avoids an intermediate submenu — that layer was where variable
  * entry silently went nowhere for some users, so this cuts it out entirely.
  */
-async function editEnvironmentFlow(store: EnvironmentsStore, envId: string): Promise<void> {
+async function editVariablesLoop(store: EnvironmentsStore, envId: string): Promise<void> {
   for (;;) {
     const environments = store.getAll();
     const env = environments.find((e) => e.id === envId);
     if (!env) return;
 
     const summary = env.variables.length
-      ? env.variables.map((v) => `${v.key}=${v.value}`).join('  ·  ')
+      ? env.variables.map((v) => (v.secret ? `🔒${v.key}=••••••` : `${v.key}=${v.value}`)).join('  ·  ')
       : 'no variables yet';
     const key = await vscode.window.showInputBox({
       title: `apibird — "${env.name}"  (${summary})`,
@@ -139,8 +139,9 @@ async function editEnvironmentFlow(store: EnvironmentsStore, envId: string): Pro
     const existing = env.variables.find((v) => v.key === key);
     const value = await vscode.window.showInputBox({
       title: `apibird — "${env.name}"`,
-      prompt: `Value for ${key}`,
+      prompt: `Value for ${key}${existing?.secret ? ' (secret — stored in the local, git-ignored file)' : ''}`,
       value: existing?.value ?? '',
+      password: existing?.secret ?? false,
     });
     if (value === undefined) continue;
 
@@ -148,26 +149,73 @@ async function editEnvironmentFlow(store: EnvironmentsStore, envId: string): Pro
     else env.variables.push({ key, value });
     await store.setAll(environments);
   }
+}
 
+/**
+ * Lets the user flag which variables in this environment hold secrets. Secret
+ * variables are written only to the git-ignored .local.json file at resolve/save
+ * time — see splitEnvironment in workspaceStorage.ts — so API keys and passwords
+ * never land in the committed, team-synced file.
+ */
+async function toggleSecretFlow(store: EnvironmentsStore, envId: string): Promise<void> {
   const environments = store.getAll();
   const env = environments.find((e) => e.id === envId);
   if (!env) return;
+  if (env.variables.length === 0) {
+    vscode.window.showInformationMessage('No variables to mark as secret yet — add some first.');
+    return;
+  }
 
-  const followUp = await vscode.window.showQuickPick(
-    ['$(check) Done', '$(edit) Rename Environment', '$(trash) Delete Environment'],
-    { placeHolder: `Finished editing "${env.name}"` }
-  );
-  if (followUp === '$(edit) Rename Environment') {
-    const name = await vscode.window.showInputBox({ prompt: 'Rename environment', value: env.name });
-    if (name) {
-      env.name = name;
-      await store.setAll(environments);
+  type Item = vscode.QuickPickItem & { key: string };
+  const items: Item[] = env.variables.map((v) => ({
+    label: v.key,
+    description: v.secret ? 'secret — kept only in the local, git-ignored file' : 'committed value',
+    picked: !!v.secret,
+    key: v.key,
+  }));
+  const picked = await vscode.window.showQuickPick(items, {
+    canPickMany: true,
+    placeHolder: 'Select which variables are secrets',
+  });
+  if (!picked) return;
+
+  const secretKeys = new Set(picked.map((p) => p.key));
+  env.variables.forEach((v) => (v.secret = secretKeys.has(v.key)));
+  await store.setAll(environments);
+}
+
+async function editEnvironmentFlow(store: EnvironmentsStore, envId: string): Promise<void> {
+  for (;;) {
+    await editVariablesLoop(store, envId);
+
+    const environments = store.getAll();
+    const env = environments.find((e) => e.id === envId);
+    if (!env) return;
+
+    const followUp = await vscode.window.showQuickPick(
+      ['$(check) Done', '$(key) Toggle Secret…', '$(edit) Rename Environment', '$(trash) Delete Environment'],
+      { placeHolder: `Finished editing "${env.name}"` }
+    );
+    if (followUp === '$(key) Toggle Secret…') {
+      await toggleSecretFlow(store, envId);
+      continue;
     }
-  } else if (followUp === '$(trash) Delete Environment') {
-    const confirm = await vscode.window.showWarningMessage(`Delete environment "${env.name}"?`, { modal: true }, 'Delete');
-    if (confirm === 'Delete') {
-      await store.setAll(environments.filter((e) => e.id !== envId));
-      if (store.getActiveId() === envId) await store.setActiveId(undefined);
+    if (followUp === '$(edit) Rename Environment') {
+      const name = await vscode.window.showInputBox({ prompt: 'Rename environment', value: env.name });
+      if (name) {
+        env.name = name;
+        await store.setAll(environments);
+      }
+      return;
     }
+    if (followUp === '$(trash) Delete Environment') {
+      const confirm = await vscode.window.showWarningMessage(`Delete environment "${env.name}"?`, { modal: true }, 'Delete');
+      if (confirm === 'Delete') {
+        await store.setAll(environments.filter((e) => e.id !== envId));
+        if (store.getActiveId() === envId) await store.setActiveId(undefined);
+      }
+      return;
+    }
+    return;
   }
 }

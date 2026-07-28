@@ -6,6 +6,7 @@ export type AuthConfig =
 export interface KeyValue {
   key: string;
   value: string;
+  secret?: boolean;
 }
 
 export interface SavedRequest {
