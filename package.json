@@ -2,7 +2,7 @@
   "name": "rest-tester",
   "displayName": "apibird — REST Tester",
   "description": "A lightweight REST client to test API requests inside VS Code",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "amitcode7483",
   "repository": {
     "type": "git",
@@ -102,6 +102,15 @@
       {
         "command": "apibird.importCurl",
         "title": "apibird: Import cURL"
+      },
+      {
+        "command": "apibird.deleteHistoryEntry",
+        "title": "Delete"
+      },
+      {
+        "command": "apibird.clearHistory",
+        "title": "apibird: Clear History",
+        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -114,6 +123,11 @@
         {
           "command": "apibird.importCollection",
           "when": "view == apibird.collections",
+          "group": "navigation"
+        },
+        {
+          "command": "apibird.clearHistory",
+          "when": "view == apibird.history",
           "group": "navigation"
         }
       ],
@@ -138,6 +152,10 @@
         {
           "command": "apibird.deleteItem",
           "when": "view == apibird.collections && (viewItem == collection || viewItem == folder || viewItem == request)"
+        },
+        {
+          "command": "apibird.deleteHistoryEntry",
+          "when": "view == apibird.history && viewItem == historyEntry"
         }
       ]
     }

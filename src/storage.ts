@@ -139,4 +139,13 @@ export class HistoryStore {
     const entries = [entry, ...this.getAll()].slice(0, HISTORY_LIMIT);
     await this.context.globalState.update(HISTORY_KEY, entries);
   }
+
+  async remove(id: string): Promise<void> {
+    const entries = this.getAll().filter((e) => e.id !== id);
+    await this.context.globalState.update(HISTORY_KEY, entries);
+  }
+
+  async clear(): Promise<void> {
+    await this.context.globalState.update(HISTORY_KEY, []);
+  }
 }

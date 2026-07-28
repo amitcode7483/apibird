@@ -17,6 +17,7 @@ export class HistoryProvider implements vscode.TreeDataProvider<HistoryEntry> {
     const ok = typeof entry.status === 'number' && entry.status >= 200 && entry.status < 400;
     item.description = `${entry.status} · ${entry.time} ms`;
     item.iconPath = new vscode.ThemeIcon(ok ? 'pass' : 'error');
+    item.contextValue = 'historyEntry';
     item.command = {
       command: 'apibird.openHistoryEntry',
       title: 'Reload Request',

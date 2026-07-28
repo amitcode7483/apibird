@@ -132,6 +132,24 @@ export async function activate(context: vscode.ExtensionContext) {
       RestPanel.createOrShow(panelDeps).loadFromHistory(entry);
     }),
 
+    vscode.commands.registerCommand('apibird.deleteHistoryEntry', async (entry: HistoryEntry) => {
+      if (!entry) return;
+      await historyStore.remove(entry.id);
+      historyProvider.refresh();
+    }),
+
+    vscode.commands.registerCommand('apibird.clearHistory', async () => {
+      if (historyStore.getAll().length === 0) return;
+      const confirm = await vscode.window.showWarningMessage(
+        'Clear all history? This cannot be undone.',
+        { modal: true },
+        'Clear All'
+      );
+      if (confirm !== 'Clear All') return;
+      await historyStore.clear();
+      historyProvider.refresh();
+    }),
+
     vscode.commands.registerCommand('apibird.openRequest', (ref: NodeRef) => {
       const request = findRequest(collectionsStore.getAll(), ref);
       if (!request) {
